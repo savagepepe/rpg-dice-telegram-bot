@@ -13,7 +13,8 @@ RPG Dice Bot per Telegram (versione Railway/Docker)
   - Etichette "Dado Tiro" / "Dado Fortuna" bilanciate sopra ogni dado
   - Sfondo NERO
   - Sagoma del dado in trasparenza, colore SEPPIA MOLTO CHIARO
-  - Sagoma regolata per NON COPRIRE le altre scritte (titolo, etichette, dettagli)
+  - Sagome SCALABILI: stessa dimensione visiva per tutti i tipi di dado
+  - Sagome posizionate in modo da NON COPRIRE le scritte (titolo, etichette, dettagli)
   - Numero del risultato AL CENTRO della sagoma (orizzontale e verticale)
   - Font: DEFAULT di Pillow
   - Dimensione numero: REGOLABILE (default 80)
@@ -227,7 +228,8 @@ def draw_fantasy_result(results: list[dict]) -> bytes:
       - etichette "Dado Tiro" / "Dado Fortuna" bilanciate sopra ogni dado
       - sfondo NERO
       - sagoma dado colore SEPPIA MOLTO CHIARO in trasparenza
-      - sagoma regolata per NON COPRIRE titolo/etichette/dettagli
+      - sagome SCALABILI: stessa dimensione visiva per tutti i tipi di dado
+      - sagome posizionate in modo da NON COPRIRE le scritte
       - risultato AL CENTRO della sagoma (orizzontale e verticale)
       - FONT: DEFAULT di Pillow
       - DIMENSIONE NUMERO: REGOLABILE (default 80)
@@ -288,13 +290,17 @@ def draw_fantasy_result(results: list[dict]) -> bytes:
             (results[0], "Dado Tiro", width * 0.25),
         ]
 
+    # Dimensione base comune per tutte le sagome, in modo che abbiano la stessa dimensione visiva
+    # Uso un fattore fisso rispetto all'altezza, uguale per tutti i dadi
+    base_die_size = height * 0.32
+
     for res, label, cx in columns:
-        # Centro verticale leggermente più basso per dare spazio sopra/sotto
+        # Centro verticale scelto in modo da lasciare spazio sopra (etichetta) e sotto (dettagli)
         cy = height * 0.58
 
-        # Sagoma dado (seppia molto chiaro) - PIÙ¹ PICCOLA e senza coprire le scritte
-        # Prima: height * 0.40, ora: height * 0.32
-        die_size = height * 0.32
+        # Sagoma dado (seppia molto chiaro)
+        # Uso la stessa dimensione base per tutti i tipi di dado (scalata uniformemente)
+        die_size = base_die_size
         draw_die_shape(draw, res["faces"], cx, cy, die_size, shape_color)
 
         # Font numero con dimensione regolabile
