@@ -11,6 +11,11 @@ RPG Dice Bot per Telegram (versione Railway/Docker)
   - se il primo lancio è 1: "(1)" accanto al totale
   - se SIA dado tiro SIA dado fortuna hanno primo lancio = 1:
     appare una scritta "🔴 FALLIMENTO CRITICO 🔴" sotto i risultati
+- Nuova funzione:
+  - /iniziativa nome1 nome2 nome3 ...
+    - estrae una carta a testa da un mazzo poker + 2 jolly
+    - crea una lista ordinata per valore della carta
+    - mostra: nome – valore + emoji seme (es. A ♥️, K ♠️, Jolly 🃏)
 """
 
 import logging
@@ -183,12 +188,94 @@ def format_result(results: list[dict]) -> str:
 
 
 # =========================
+# INIZIATIVA CON CARTE
+# =========================
+
+# Mazzo da poker + 2 jolly
+# Valori: A, 2–10, J, Q, K, Jolly
+# Semi: ♠️ ♥️ ♦️ ♣️
+# Ordine di valore (dal più alto al più basso):
+#   Jolly, A, K, Q, J, 10, 9, 8, 7, 6, 5, 4, 3, 2
+
+VALORI_CARTE = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
+SEMI = ["♠️", "♥️", "♦️", "♣️"]
+
+def crea_mazzo():
+    mazzo = []
+    for valore in VALORI_CARTE:
+        for seme in SEMI:
+            mazzo.append((valore, seme))
+    # Aggiungo 2 jolly
+    mazzo.append(("Jolly", "🃏"))
+    mazzo.append(("Jolly", "🃏"))
+    return mazzo
+
+def ordine_valore_carta(valore: str) -> int:
+    """
+    Restituisce un punteggio per ordinare le carte:
+    più alto = priorità maggiore nell'iniziativa.
+    Ordine: Jolly > A > K > Q > J > 10 > ... > 2
+    """
+    if valore == "Jolly":
+        return 100
+    if valore == "A":
+        return 14
+    if valore == "K":
+        return 13
+    if valore == "Q":
+        return 12
+    if valore == "J":
+        return 11
+    # 2–10
+    try:
+        return int(valore)
+    except ValueError:
+        return 0
+
+def estrai_carta_per_iniziativa(nomi: list[str]):
+    """
+    Dato un elenco di nomi, estrae una carta a testa da un mazzo poker + 2 jolly.
+    Restituisce una lista di tuple:
+      [(nome, valore, seme), ...]
+    già ordinata per valore della carta (dal più alto al più basso).
+    """
+    mazzo = crea_mazzo()
+    random.shuffle(mazzo)
+
+    if len(nomi) > len(mazzo):
+        # Non ci sono abbastanza carte, taglio i nomi in eccesso
+        nomi = nomi[:len(mazzo)]
+
+    estrazioni = []
+    for nome in nomi:
+        carta = mazzo.pop()
+        valore, seme = carta
+        estrazioni.append((nome, valore, seme))
+
+    # Ordino per valore della carta (dal più alto al più basso)
+    estrazioni.sort(key=lambda x: ordine_valore_carta(x[1]), reverse=True)
+    return estrazioni
+
+
+def format_iniziativa(estrazioni: list[tuple[str, str, str]]) -> str:
+    """
+    Formatta la lista di iniziative come messaggio di testo.
+    estrazioni: lista di (nome, valore, seme) già ordinata.
+    """
+    lines = []
+    for i, (nome, valore, seme) in enumerate(estrazioni, start=1):
+        lines.append(f"{i}. {nome} – {valore} {seme}")
+    return "\n".join(lines)
+
+
+# =========================
 # HANDLER TELEGRAM
 # =========================
 
 async def start(update: Update, context):
     await update.message.reply_text(
-        "Ciao! Sono il tuo bot RPG per lanci di dadi (solo testo).\n\n"
+        "Ciao! Sono il tuo bot RPG per lanci di dadi e iniziative (solo testo).\n\n"
+        "Dadi:\n"
         "Macro disponibili:\n"
         "/d4  → 1d4! 1d6!\n"
         "/d6  → 1d6! 1d6!\n"
@@ -200,6 +287,9 @@ async def start(update: Update, context):
         "/dadi 1d20+5 1d6!\n"
         "/dadi 2d8+3 1d6!\n"
         "/dadi 1d6! 1d4!\n\n"
+        "Iniziativa:\n"
+        "/iniziativa nome1 nome2 nome3 ...\n"
+        "Estrae una carta a testa (poker + 2 jolly) e ordina l'iniziativa.\n\n"
         "I dadi con ! esplodono. Il 1d6! è il 'Dado Fortuna'.\n"
         "Se entrambi i dadi fanno 1 al primo lancio, appare 'FALLIMENTO CRITICO'."
     )
@@ -210,10 +300,11 @@ async def help_cmd(update: Update, context):
         "/start – Benvenuto\n"
         "/aiuto – Questa guida\n"
         "/dadi <espressione> – Lancio libero\n"
-        "/d4, /d6, /d8, /d10, /d12, /d20 – Macro\n\n"
+        "/d4, /d6, /d8, /d10, /d12, /d20 – Macro\n"
+        "/iniziativa nome1 nome2 ... – Estrazione carte per iniziativa\n\n"
         "Esempi:\n"
         "/dadi 1d20+5 1d6!\n"
-        "/dadi 2d8+3 1d6!"
+        "/iniziativa Alice Bob Carlo"
     )
 
 async def macro_handler(update: Update, context):
@@ -255,11 +346,28 @@ async def lancia_e_invia_testo(update: Update, expr: str, macro_name: str | None
     messaggio = f"{caption}\n\n{testo}"
     await update.message.reply_text(messaggio, parse_mode="Markdown")
 
+async def iniziativa_handler(update: Update, context):
+    args = context.args
+    if not args:
+        await update.message.reply_text(
+            "Uso: /iniziativa nome1 nome2 nome3 ...\n"
+            "Esempio: /iniziativa Alice Bob Carlo"
+        )
+        return
+
+    nomi = args
+    estrazioni = estrai_carta_per_iniziativa(nomi)
+    testo = format_iniziativa(estrazioni)
+
+    messaggio = f"*Iniziativa:*\n{testo}"
+    await update.message.reply_text(messaggio, parse_mode="Markdown")
+
 def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("aiuto", help_cmd))
     app.add_handler(CommandHandler("dadi", dadi_handler))
+    app.add_handler(CommandHandler("iniziativa", iniziativa_handler))
     for dado in ("d4", "d6", "d8", "d10", "d12", "d20"):
         app.add_handler(CommandHandler(dado, macro_handler))
     logging.info("Bot RPG avviato...")
