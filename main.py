@@ -14,7 +14,10 @@ RPG Dice Bot per Telegram (versione Railway/Docker)
 - Nuova funzione:
   - /iniziativa nome1 nome2 nome3 ...
     - estrae una carta a testa da un mazzo poker + 2 jolly
-    - crea una lista ordinata per valore della carta
+    - SENZA ripetere carte già usate, finché±± non esce almeno un jolly
+    - quando esce almeno un jolly, il mazzo usato viene resettato automaticamente
+    - /iniziativa riavvio → azzera manualmente il mazzo usato
+    - ordine semi: Cuori ♥️ > Quadri ♦️ > Fiori ♣️ > Picche ♠️
     - mostra: nome – valore + emoji seme (es. A ♥️, K ♠️, Jolly 🃏)
 """
 
@@ -188,7 +191,7 @@ def format_result(results: list[dict]) -> str:
 
 
 # =========================
-# INIZIATIVA CON CARTE
+# INIZIATIVA CON CARTE (MEMORIA IN RAM)
 # =========================
 
 # Mazzo da poker + 2 jolly
@@ -196,14 +199,28 @@ def format_result(results: list[dict]) -> str:
 # Semi: ♠️ ♥️ ♦️ ♣️
 # Ordine di valore (dal più alto al più basso):
 #   Jolly, A, K, Q, J, 10, 9, 8, 7, 6, 5, 4, 3, 2
+# Ordine di seme (a parità±¹ di valore): Cuori ♥️ > Quadri ♦️ > Fiori ♣️ > Picche ♠️
 
 VALORI_CARTE = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
-SEMI = ["♠️", "♥️", "♦️", "♣️"]
+SEMI_CON_PUNTEGGIO = [
+    ("♠️", 0),  # Picche
+    ("♣️", 1),  # Fiori
+    ("♦️", 2),  # Quadri
+    ("♥️", 3),  # Cuori
+]
 
-def crea_mazzo():
+# Variabili globali per la memoria del mazzo usato
+MAZZO_USATO = set()  # insieme di tuple (valore, seme) già estratte
+MAZZO_RESETTATO_PER_JOLLY = True  # True = il mazzo è "pulito", non è ancora uscito jolly dall'ultimo reset
+
+def crea_mazzo_completo():
+    """
+    Crea l'elenco completo di tutte le carte del mazzo (poker + 2 jolly).
+    Ogni carta è una tupla (valore, seme).
+    """
     mazzo = []
     for valore in VALORI_CARTE:
-        for seme in SEMI:
+        for seme, _ in SEMI_CON_PUNTEGGIO:
             mazzo.append((valore, seme))
     # Aggiungo 2 jolly
     mazzo.append(("Jolly", "🃏"))
@@ -211,11 +228,6 @@ def crea_mazzo():
     return mazzo
 
 def ordine_valore_carta(valore: str) -> int:
-    """
-    Restituisce un punteggio per ordinare le carte:
-    più alto = priorità maggiore nell'iniziativa.
-    Ordine: Jolly > A > K > Q > J > 10 > ... > 2
-    """
     if valore == "Jolly":
         return 100
     if valore == "A":
@@ -226,42 +238,83 @@ def ordine_valore_carta(valore: str) -> int:
         return 12
     if valore == "J":
         return 11
-    # 2–10
     try:
         return int(valore)
     except ValueError:
         return 0
 
+def ordine_seme(seme: str) -> int:
+    for s, punteggio in SEMI_CON_PUNTEGGIO:
+        if s == seme:
+            return punteggio
+    return 0
+
+def resetta_mazzo():
+    """
+    Resetta il mazzo usato (chiamato quando esce almeno un jolly o con /iniziativa riavvio).
+    """
+    global MAZZO_USATO, MAZZO_RESETTATO_PER_JOLLY
+    MAZZO_USATO = set()
+    MAZZO_RESETTATO_PER_JOLLY = True
+
 def estrai_carta_per_iniziativa(nomi: list[str]):
     """
-    Dato un elenco di nomi, estrae una carta a testa da un mazzo poker + 2 jolly.
+    Dato un elenco di nomi, estrae una carta a testa da un mazzo poker + 2 jolly,
+    SENZA ripetere carte già usate (memorizzate in MAZZO_USATO),
+    finché±± non esce almeno un jolly.
+    Quando esce almeno un jolly, il mazzo usato viene resettato automaticamente.
     Restituisce una lista di tuple:
       [(nome, valore, seme), ...]
-    già ordinata per valore della carta (dal più alto al più basso).
+    già ordinata per valore e seme.
     """
-    mazzo = crea_mazzo()
-    random.shuffle(mazzo)
+    global MAZZO_USATO, MAZZO_RESETTATO_PER_JOLLY
 
-    if len(nomi) > len(mazzo):
-        # Non ci sono abbastanza carte, taglio i nomi in eccesso
-        nomi = nomi[:len(mazzo)]
+    mazzo_completo = crea_mazzo_completo()
+
+    # Carte disponibili = tutte quelle non ancora in MAZZO_USATO
+    carte_disponibili = [c for c in mazzo_completo if c not in MAZZO_USATO]
+
+    # Se per qualche motivo non ci sono abbastanza carte, resetto
+    if len(carte_disponibili) < len(nomi):
+        resetta_mazzo()
+        carte_disponibili = crea_mazzo_completo()
+
+    random.shuffle(carte_disponibili)
 
     estrazioni = []
+    jolly_estratto = False
+
     for nome in nomi:
-        carta = mazzo.pop()
+        if not carte_disponibili:
+            # Se finiscono le carte, resetto e continuo
+            resetta_mazzo()
+            carte_disponibili = crea_mazzo_completo()
+            random.shuffle(carte_disponibili)
+
+        carta = carte_disponibili.pop()
         valore, seme = carta
         estrazioni.append((nome, valore, seme))
 
-    # Ordino per valore della carta (dal più alto al più basso)
-    estrazioni.sort(key=lambda x: ordine_valore_carta(x[1]), reverse=True)
+        # Segno la carta come usata
+        MAZZO_USATO.add(carta)
+
+        # Se è un jolly, segno che è uscito un jolly
+        if valore == "Jolly":
+            jolly_estratto = True
+
+    # Se è uscito almeno un jolly, resetto il mazzo usato per il prossimo turno
+    if jolly_estratto:
+        resetta_mazzo()
+
+    # Ordino per valore (decrescente) e, a parità±¹, per seme (decrescente)
+    estrazioni.sort(
+        key=lambda x: (ordine_valore_carta(x[1]), ordine_seme(x[2])),
+        reverse=True
+    )
     return estrazioni
 
 
 def format_iniziativa(estrazioni: list[tuple[str, str, str]]) -> str:
-    """
-    Formatta la lista di iniziative come messaggio di testo.
-    estrazioni: lista di (nome, valore, seme) già ordinata.
-    """
     lines = []
     for i, (nome, valore, seme) in enumerate(estrazioni, start=1):
         lines.append(f"{i}. {nome} – {valore} {seme}")
@@ -289,7 +342,10 @@ async def start(update: Update, context):
         "/dadi 1d6! 1d4!\n\n"
         "Iniziativa:\n"
         "/iniziativa nome1 nome2 nome3 ...\n"
-        "Estrae una carta a testa (poker + 2 jolly) e ordina l'iniziativa.\n\n"
+        "Estrae una carta a testa (poker + 2 jolly) senza ripetere carte già usate.\n"
+        "Quando esce almeno un jolly, il mazzo usato viene resettato automaticamente.\n"
+        "/iniziativa riavvio → azzera manualmente il mazzo usato.\n"
+        "Ordine semi: Cuori ♥️ > Quadri ♦️ > Fiori ♣️ > Picche ♠️\n\n"
         "I dadi con ! esplodono. Il 1d6! è il 'Dado Fortuna'.\n"
         "Se entrambi i dadi fanno 1 al primo lancio, appare 'FALLIMENTO CRITICO'."
     )
@@ -301,10 +357,12 @@ async def help_cmd(update: Update, context):
         "/aiuto – Questa guida\n"
         "/dadi <espressione> – Lancio libero\n"
         "/d4, /d6, /d8, /d10, /d12, /d20 – Macro\n"
-        "/iniziativa nome1 nome2 ... – Estrazione carte per iniziativa\n\n"
+        "/iniziativa nome1 nome2 ... – Estrazione carte per iniziativa\n"
+        "/iniziativa riavvio – Azzera il mazzo usato\n\n"
         "Esempi:\n"
         "/dadi 1d20+5 1d6!\n"
-        "/iniziativa Alice Bob Carlo"
+        "/iniziativa Alice Bob Carlo\n"
+        "/iniziativa riavvio"
     )
 
 async def macro_handler(update: Update, context):
@@ -351,7 +409,18 @@ async def iniziativa_handler(update: Update, context):
     if not args:
         await update.message.reply_text(
             "Uso: /iniziativa nome1 nome2 nome3 ...\n"
-            "Esempio: /iniziativa Alice Bob Carlo"
+            "Esempio: /iniziativa Alice Bob Carlo\n"
+            "Per azzerare il mazzo: /iniziativa riavvio"
+        )
+        return
+
+    # Se il primo argomento è "riavvio", resetto il mazzo
+    if args[0].lower() == "riavvio":
+        resetta_mazzo()
+        await update.message.reply_text(
+            "*Iniziativa:* mazzo usato azzerato.\n"
+            "La prossima estrazione ripartirà±¹ da un mazzo pulito.",
+            parse_mode="Markdown"
         )
         return
 
