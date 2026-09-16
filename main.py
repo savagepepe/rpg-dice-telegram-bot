@@ -13,7 +13,7 @@ RPG Dice Bot per Telegram (versione Railway/Docker)
   - Etichette "Dado Tiro" / "Dado Fortuna" bilanciate sopra ogni dado
   - Sfondo NERO
   - Sagoma del dado in trasparenza, colore SEPPIA MOLTO CHIARO
-  - Sagoma PIÙ¹ PICCOLA rispetto alla versione precedente
+  - Sagoma regolata per NON COPRIRE le altre scritte (titolo, etichette, dettagli)
   - Numero del risultato AL CENTRO della sagoma (orizzontale e verticale)
   - Font: DEFAULT di Pillow
   - Dimensione numero: REGOLABILE (default 80)
@@ -227,7 +227,7 @@ def draw_fantasy_result(results: list[dict]) -> bytes:
       - etichette "Dado Tiro" / "Dado Fortuna" bilanciate sopra ogni dado
       - sfondo NERO
       - sagoma dado colore SEPPIA MOLTO CHIARO in trasparenza
-      - sagoma PIÙ¹ PICCOLA rispetto alla versione precedente
+      - sagoma regolata per NON COPRIRE titolo/etichette/dettagli
       - risultato AL CENTRO della sagoma (orizzontale e verticale)
       - FONT: DEFAULT di Pillow
       - DIMENSIONE NUMERO: REGOLABILE (default 80)
@@ -289,11 +289,12 @@ def draw_fantasy_result(results: list[dict]) -> bytes:
         ]
 
     for res, label, cx in columns:
-        cy = height * 0.55
+        # Centro verticale leggermente più basso per dare spazio sopra/sotto
+        cy = height * 0.58
 
-        # Sagoma dado (seppia molto chiaro) - PIÙ¹ PICCOLA
-        # Prima: height * 0.55, ora: height * 0.40
-        die_size = height * 0.40
+        # Sagoma dado (seppia molto chiaro) - PIÙ¹ PICCOLA e senza coprire le scritte
+        # Prima: height * 0.40, ora: height * 0.32
+        die_size = height * 0.32
         draw_die_shape(draw, res["faces"], cx, cy, die_size, shape_color)
 
         # Font numero con dimensione regolabile
@@ -312,7 +313,6 @@ def draw_fantasy_result(results: list[dict]) -> bytes:
 
         totale_str = str(res["totale"])
         # Centro esatto della sagoma: (cx, cy)
-        # Calcolo bbox del testo per centrarlo perfettamente
         bbox = draw.textbbox((0, 0), totale_str, font=result_font)
         rw = bbox[2] - bbox[0]
         rh = bbox[3] - bbox[1]
@@ -338,8 +338,8 @@ def draw_fantasy_result(results: list[dict]) -> bytes:
             mod_sign = "+" if res["mod"] > 0 else ""
             details_lines.append(f"Mod: {mod_sign}{res['mod']} | Tot: {res['totale']}")
 
-        # Posiziono i dettagli sotto la sagoma, con un piccolo margine
-        y_detail = cy + die_size * 0.70
+        # Dettagli posizionati sotto la sagoma, con margine
+        y_detail = cy + die_size * 0.80
         for line in details_lines:
             dw = draw.textlength(line, font=detail_font)
             draw.text((cx - dw / 2, y_detail), line, fill=text_color, font=detail_font)
