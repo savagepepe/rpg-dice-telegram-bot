@@ -7,8 +7,8 @@ RPG Dice Bot per Telegram (versione Railway/Docker)
 - Supporto esplosioni (!)
 - Risultati mostrati come messaggio di testo formattato
 - Indicazioni:
-  - se il dado esplode: "(esplode)" accanto al totale
-  - se il primo lancio è 1: "(1)" accanto al totale
+  - se il dado esplode: "(esplode) 🎉" accanto al totale
+  - se il primo lancio è 1: "(1) ❌" accanto al totale
   - se SIA dado tiro SIA dado fortuna hanno primo lancio = 1:
     appare una scritta "🔴 FALLIMENTO CRITICO 🔴" sotto i risultati
 - Nuova funzione:
@@ -125,8 +125,8 @@ def roll_expression(expr: str):
 def format_result(results: list[dict]) -> str:
     """
     Formatta i risultati come messaggio di testo con:
-      - indicazione (esplode) se il dado esplode
-      - indicazione (1) se il primo lancio è 1
+      - indicazione (esplode) 🎉 se il dado esplode
+      - indicazione (1) ❌ se il primo lancio è 1
       - se SIA dado tiro SIA dado fortuna hanno primo lancio = 1:
         aggiunge "🔴 FALLIMENTO CRITICO 🔴" sotto i risultati
     Usa la formattazione Markdown di Telegram.
@@ -141,7 +141,10 @@ def format_result(results: list[dict]) -> str:
         lines.append(f"Dado Tiro ({res_tiro['raw']}):")
         for j, det in enumerate(res_tiro["dettagli"], start=1):
             rolls_str = ", ".join(str(r) for r in det["rolls"])
-            explode_mark = " (esplode)" if res_tiro["explode"] and len(det["rolls"]) > 1 else ""
+            explode_mark = " (esplode) 🎉" if res_tiro["explode"] and len(det["rolls"]) > 1 else ""
+            # Aggiungo ❌ solo se il primo lancio è 1 e non ci sono esplosioni
+            if not explode_mark and res_tiro.get("primo_lancio") == 1:
+                explode_mark = " (1) ❌"
             lines.append(f"  Dado {j}: [{rolls_str}] = {det['subtotale']}{explode_mark}")
         if res_tiro["mod"] != 0:
             mod_sign = "+" if res_tiro["mod"] > 0 else ""
@@ -152,9 +155,9 @@ def format_result(results: list[dict]) -> str:
 
         if primo_lancio == 1:
             primo_tiro_1 = True
-            lines.append(f"  *Totale tiro: {res_tiro['totale']} (1)*")
+            lines.append(f"  *Totale tiro: {res_tiro['totale']} (1) ❌*")
         elif has_explode:
-            lines.append(f"  *Totale tiro: {res_tiro['totale']} (esplode)*")
+            lines.append(f"  *Totale tiro: {res_tiro['totale']} (esplode) 🎉*")
         else:
             lines.append(f"  *Totale tiro: {res_tiro['totale']}*")
 
@@ -165,7 +168,9 @@ def format_result(results: list[dict]) -> str:
         lines.append(f"Dado Fortuna ({res_fortuna['raw']}):")
         for j, det in enumerate(res_fortuna["dettagli"], start=1):
             rolls_str = ", ".join(str(r) for r in det["rolls"])
-            explode_mark = " (esplode)" if res_fortuna["explode"] and len(det["rolls"]) > 1 else ""
+            explode_mark = " (esplode) 🎉" if res_fortuna["explode"] and len(det["rolls"]) > 1 else ""
+            if not explode_mark and res_fortuna.get("primo_lancio") == 1:
+                explode_mark = " (1) ❌"
             lines.append(f"  Dado {j}: [{rolls_str}] = {det['subtotale']}{explode_mark}")
         if res_fortuna["mod"] != 0:
             mod_sign = "+" if res_fortuna["mod"] > 0 else ""
@@ -176,9 +181,9 @@ def format_result(results: list[dict]) -> str:
 
         if primo_lancio == 1:
             primo_fortuna_1 = True
-            lines.append(f"  *Totale fortuna: {res_fortuna['totale']} (1)*")
+            lines.append(f"  *Totale fortuna: {res_fortuna['totale']} (1) ❌*")
         elif has_explode:
-            lines.append(f"  *Totale fortuna: {res_fortuna['totale']} (esplode)*")
+            lines.append(f"  *Totale fortuna: {res_fortuna['totale']} (esplode) 🎉*")
         else:
             lines.append(f"  *Totale fortuna: {res_fortuna['totale']}*")
 
@@ -214,10 +219,6 @@ MAZZO_USATO = set()  # insieme di tuple (valore, seme) già estratte
 MAZZO_RESETTATO_PER_JOLLY = True  # True = il mazzo è "pulito", non è ancora uscito jolly dall'ultimo reset
 
 def crea_mazzo_completo():
-    """
-    Crea l'elenco completo di tutte le carte del mazzo (poker + 2 jolly).
-    Ogni carta è una tupla (valore, seme).
-    """
     mazzo = []
     for valore in VALORI_CARTE:
         for seme, _ in SEMI_CON_PUNTEGGIO:
@@ -250,31 +251,16 @@ def ordine_seme(seme: str) -> int:
     return 0
 
 def resetta_mazzo():
-    """
-    Resetta il mazzo usato (chiamato quando esce almeno un jolly o con /iniziativa riavvio).
-    """
     global MAZZO_USATO, MAZZO_RESETTATO_PER_JOLLY
     MAZZO_USATO = set()
     MAZZO_RESETTATO_PER_JOLLY = True
 
 def estrai_carta_per_iniziativa(nomi: list[str]):
-    """
-    Dato un elenco di nomi, estrae una carta a testa da un mazzo poker + 2 jolly,
-    SENZA ripetere carte già usate (memorizzate in MAZZO_USATO),
-    finché±± non esce almeno un jolly.
-    Quando esce almeno un jolly, il mazzo usato viene resettato automaticamente.
-    Restituisce una lista di tuple:
-      [(nome, valore, seme), ...]
-    già ordinata per valore e seme.
-    """
     global MAZZO_USATO, MAZZO_RESETTATO_PER_JOLLY
 
     mazzo_completo = crea_mazzo_completo()
-
-    # Carte disponibili = tutte quelle non ancora in MAZZO_USATO
     carte_disponibili = [c for c in mazzo_completo if c not in MAZZO_USATO]
 
-    # Se per qualche motivo non ci sono abbastanza carte, resetto
     if len(carte_disponibili) < len(nomi):
         resetta_mazzo()
         carte_disponibili = crea_mazzo_completo()
@@ -286,7 +272,6 @@ def estrai_carta_per_iniziativa(nomi: list[str]):
 
     for nome in nomi:
         if not carte_disponibili:
-            # Se finiscono le carte, resetto e continuo
             resetta_mazzo()
             carte_disponibili = crea_mazzo_completo()
             random.shuffle(carte_disponibili)
@@ -294,19 +279,14 @@ def estrai_carta_per_iniziativa(nomi: list[str]):
         carta = carte_disponibili.pop()
         valore, seme = carta
         estrazioni.append((nome, valore, seme))
-
-        # Segno la carta come usata
         MAZZO_USATO.add(carta)
 
-        # Se è un jolly, segno che è uscito un jolly
         if valore == "Jolly":
             jolly_estratto = True
 
-    # Se è uscito almeno un jolly, resetto il mazzo usato per il prossimo turno
     if jolly_estratto:
         resetta_mazzo()
 
-    # Ordino per valore (decrescente) e, a parità±¹, per seme (decrescente)
     estrazioni.sort(
         key=lambda x: (ordine_valore_carta(x[1]), ordine_seme(x[2])),
         reverse=True
@@ -347,6 +327,7 @@ async def start(update: Update, context):
         "/iniziativa riavvio → azzera manualmente il mazzo usato.\n"
         "Ordine semi: Cuori ♥️ > Quadri ♦️ > Fiori ♣️ > Picche ♠️\n\n"
         "I dadi con ! esplodono. Il 1d6! è il 'Dado Fortuna'.\n"
+        "Emoji: 🎉 per esplosione, ❌ per 1.\n"
         "Se entrambi i dadi fanno 1 al primo lancio, appare 'FALLIMENTO CRITICO'."
     )
 
@@ -414,7 +395,6 @@ async def iniziativa_handler(update: Update, context):
         )
         return
 
-    # Se il primo argomento è "riavvio", resetto il mazzo
     if args[0].lower() == "riavvio":
         resetta_mazzo()
         await update.message.reply_text(
